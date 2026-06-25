@@ -121,7 +121,7 @@ const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight); app.appendChild(renderer.domElement);
 
-const VER = '14';                      // bump every redeploy to bust browser/CDN cache
+const VER = '15';                      // bump every redeploy to bust browser/CDN cache
 // turbo colormap (matplotlib) lookup table — the "rainbow by height" theme
 const TURBO_LUT = [48,18,59,54,33,95,59,47,128,64,64,162,67,78,186,69,94,211,70,107,227,71,123,242,70,135,251,65,150,255,58,163,252,49,175,245,39,190,233,31,201,221,25,213,205,24,222,192,29,231,178,39,238,164,56,244,145,74,248,128,93,252,111,117,254,92,136,255,78,156,254,64,169,251,57,185,246,53,198,240,52,212,231,53,223,223,55,233,213,57,242,201,58,248,190,57,252,177,54,254,164,49,254,147,42,252,132,35,248,114,28,243,99,21,237,85,16,229,71,11,221,61,8,210,49,5,200,40,3,185,30,2,172,23,1,155,15,1,139,9,2,122,4,3];
 const VMAX = 3.5;                      // truck height for the height->colour mapping
@@ -133,6 +133,7 @@ function turboColor(t){
           TURBO_LUT[i*3+2]*(1-a)+TURBO_LUT[i*3+5]*a];
 }
 let theme = 'rainbow';                 // default per client request
+let META = {};                         // meta.json (truck, volume, bed dims) for the 3D labels
 const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x0b1016, 0.016);
 const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 2000);
 camera.up.set(0,0,1); camera.position.set(9,-11,6.0);
@@ -161,6 +162,49 @@ function frameAll(){
   camera.position.copy(c).addScaledVector(dir, dist);
   camera.near = Math.max(0.05, dist*0.02); camera.far = dist*20; camera.updateProjectionMatrix();
   controls.minDistance = dist*0.3; controls.maxDistance = dist*4; controls.update();
+}
+
+// --- 3D floating labels: billboard sprites with a consistent dark card style ---
+const FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+function makeLabel(lines, scale=0.0024){
+  const dpr=2, padX=26, padY=20, meas=document.createElement('canvas').getContext('2d');
+  let w=0; lines.forEach(l => { meas.font=`${l.b?'700 ':'400 '}${l.fs}px ${FONT}`; w=Math.max(w, meas.measureText(l.t).width); });
+  const lh=lines.map(l=>l.fs*1.34), th=lh.reduce((a,b)=>a+b,0);
+  const cw=Math.ceil(w+padX*2), ch=Math.ceil(th+padY*2);
+  const cv=document.createElement('canvas'); cv.width=cw*dpr; cv.height=ch*dpr;
+  const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
+  ctx.fillStyle='rgba(11,16,22,0.86)'; ctx.strokeStyle='rgba(240,180,74,0.40)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.roundRect(1,1,cw-2,ch-2,15); ctx.fill(); ctx.stroke();
+  let y=padY; lines.forEach((l,i)=>{ ctx.font=`${l.b?'700 ':'400 '}${l.fs}px ${FONT}`; ctx.fillStyle=l.c||'#e8eef5'; ctx.textBaseline='top'; ctx.fillText(l.t, padX, y); y+=lh[i]; });
+  const tex=new THREE.CanvasTexture(cv); tex.minFilter=THREE.LinearFilter; tex.anisotropy=4;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false, depthWrite:false }));
+  sp.scale.set(cw*scale, ch*scale, 1); sp.renderOrder=999; return sp;
+}
+function buildLabels(){
+  const b=META.bed; if(!b) return;
+  const grp=new THREE.Group(); grp.name='labels';
+  const fz=b.floor_z, hw=b.half_w, x0=b.x0, x1=b.x1, H=b.height_m, midx=(x0+x1)/2, top=fz+H, V=(x,y,z)=>new THREE.Vector3(x,y,z);
+  const card=makeLabel([
+    {t:'TRUCK '+(META.truck||''), b:true, fs:30, c:'#f0b44a'},
+    {t:'Material load (LiDAR-measured)', fs:21, c:'#9fb0c2'},
+    {t:META.volume_m3+' m³   ≈ '+META.mass_t+' t', b:true, fs:42, c:'#ffd98a'},
+    {t:'Bed  '+b.length_m+' L × '+b.width_m+' W × '+b.height_m+' H  m', fs:23, c:'#e8eef5'},
+    {t:'Bed capacity  '+b.capacity_m3+' m³', fs:21, c:'#9fb0c2'},
+  ], 0.0027);
+  card.position.set(midx, 0, top+1.0); grp.add(card);
+  const lineMat=new THREE.LineBasicMaterial({ color:0xf0b44a, transparent:true, opacity:0.85, depthTest:false });
+  const dim=(a,c)=>{ const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints([a,c]), lineMat); l.renderOrder=998; grp.add(l); };
+  const tick=(p,dir)=>{ dim(p.clone().add(dir), p.clone().sub(dir)); };
+  // length along the front-side floor edge
+  dim(V(x0,-hw-0.25,fz), V(x1,-hw-0.25,fz)); tick(V(x0,-hw-0.25,fz),V(0,0,0.12)); tick(V(x1,-hw-0.25,fz),V(0,0,0.12));
+  const Ll=makeLabel([{t:'Length  '+b.length_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0023); Ll.position.set(midx,-hw-0.25,fz-0.28); grp.add(Ll);
+  // width across the rear floor edge
+  dim(V(x1+0.25,-hw,fz), V(x1+0.25,hw,fz)); tick(V(x1+0.25,-hw,fz),V(0,0,0.12)); tick(V(x1+0.25,hw,fz),V(0,0,0.12));
+  const Wl=makeLabel([{t:'Width  '+b.width_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0023); Wl.position.set(x1+0.25,0,fz-0.28); grp.add(Wl);
+  // height up the rear corner
+  dim(V(x0-0.25,hw,fz), V(x0-0.25,hw,top)); tick(V(x0-0.25,hw,fz),V(0.12,0,0)); tick(V(x0-0.25,hw,top),V(0.12,0,0));
+  const Hl=makeLabel([{t:'Height  '+b.height_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0023); Hl.position.set(x0-0.25,hw,fz+H/2); grp.add(Hl);
+  scene.add(grp);
 }
 
 const grid = new THREE.GridHelper(50,50, 0x2a3a4d, 0x18232f); grid.rotation.x=Math.PI/2; scene.add(grid);
@@ -224,10 +268,10 @@ function animate(){
 }
 
 (async () => {
-  try { const m = await (await fetch('clouds/meta.json?v='+VER)).json();
-    truckid.textContent=m.truck; volnum.innerHTML=m.volume_m3+' <span>m³</span>'; massnum.textContent=m.mass_t; } catch(e){}
+  try { META = await (await fetch('clouds/meta.json?v='+VER)).json();
+    truckid.textContent=META.truck; volnum.innerHTML=META.volume_m3+' <span>m³</span>'; massnum.textContent=META.mass_t; } catch(e){}
   await Promise.all([ load('structure', bedMat), load('material', matMat), load('empty', bedMat) ]);
-  show('full'); setTheme('rainbow'); frameAll(); loadEl.classList.add('gone'); animate();
+  show('full'); setTheme('rainbow'); buildLabels(); frameAll(); loadEl.classList.add('gone'); animate();
   // re-frame after the viewport settles (mobile address-bar / late layout) until the user interacts
   requestAnimationFrame(()=>{ if(!userMoved) frameAll(); });
   setTimeout(()=>{ if(!userMoved) frameAll(); }, 500);

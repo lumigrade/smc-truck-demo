@@ -1,11 +1,21 @@
 {
   "truck": "37H11558",
-  "volume_m3": 13.9,
-  "mass_t": 20.8,
+  "volume_m3": 14.2,
+  "mass_t": 21.3,
   "density": 1.5,
-  "material_pts": 37657,
-  "structure_pts": 86708,
-  "empty_pts": 131044,
+  "material_pts": 37012,
+  "structure_pts": 87268,
+  "empty_pts": 166917,
   "length_m": 9.7,
-  "reg_fitness": 0.93
+  "reg_fitness": 0.94,
+  "bed": {
+    "length_m": 6.42,
+    "width_m": 2.97,
+    "height_m": 1.76,
+    "capacity_m3": 33.5,
+    "floor_z": 1.49,
+    "x0": -2.71,
+    "x1": 3.71,
+    "half_w": 1.49
+  }
 }
