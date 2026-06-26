@@ -129,7 +129,7 @@ const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight); app.appendChild(renderer.domElement);
 
-const VER = '17';                      // bump every redeploy to bust browser/CDN cache
+const VER = '19';                      // bump every redeploy to bust browser/CDN cache
 // turbo colormap (matplotlib) lookup table — the "rainbow by height" theme
 const TURBO_LUT = [48,18,59,54,33,95,59,47,128,64,64,162,67,78,186,69,94,211,70,107,227,71,123,242,70,135,251,65,150,255,58,163,252,49,175,245,39,190,233,31,201,221,25,213,205,24,222,192,29,231,178,39,238,164,56,244,145,74,248,128,93,252,111,117,254,92,136,255,78,156,254,64,169,251,57,185,246,53,198,240,52,212,231,53,223,223,55,233,213,57,242,201,58,248,190,57,252,177,54,254,164,49,254,147,42,252,132,35,248,114,28,243,99,21,237,85,16,229,71,11,221,61,8,210,49,5,200,40,3,185,30,2,172,23,1,155,15,1,139,9,2,122,4,3];
 const VMAX = 3.5;                      // truck height for the height->colour mapping
@@ -145,14 +145,23 @@ let META = {};                         // meta.json (truck, volume, bed dims) fo
 const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x0b1016, 0.016);
 const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 2000);
 camera.up.set(0,0,1); camera.position.set(9,-11,6.0);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping=true; controls.dampingFactor=0.08; controls.target.set(0,0,1.3);
-controls.minDistance=2; controls.maxDistance=60; controls.maxPolarAngle=Math.PI*0.5;
-let userMoved=false; controls.addEventListener('start', ()=>{ userMoved=true; });
+let userMoved=false, controls;
+function mkControls(up){                 // OrbitControls caches the up-frame at construction -> re-make it per view
+  const tgt = controls ? controls.target.clone() : new THREE.Vector3(0,0,1.3);
+  if (controls) controls.dispose();
+  camera.up.set(up[0], up[1], up[2]);
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping=true; controls.dampingFactor=0.08;
+  controls.minDistance=2; controls.maxDistance=60;
+  controls.maxPolarAngle = (up[1]===1) ? Math.PI : Math.PI*0.5;   // top (up=Y) full range; side/iso (up=Z) above-ground
+  controls.target.copy(tgt);
+  controls.addEventListener('start', ()=>{ userMoved=true; });
+}
+mkControls([0,0,1]);
 
 // Frame the WHOLE truck no matter where it sits or how big it is, from a 3/4 side
 // view, so nothing is ever cropped out of the default view.
-function frameAll(dir3){
+function frameAll(dir3, up3){
   const box = new THREE.Box3();
   ['structure','empty','material'].forEach(k => { if (clouds[k]) box.expandByObject(clouds[k]); });
   if (box.isEmpty()) return;
@@ -167,7 +176,7 @@ function frameAll(dir3){
   const len = Math.max(s.x, s.y), hgt = s.z;
   const dist = Math.max( (len/2)/Math.tan(hfov/2), (hgt/2)/Math.tan(vfov/2) ) * 1.32;
   const dir = (dir3 || new THREE.Vector3(0.25, -0.95, 0.30)).clone().normalize();  // default side-3/4; presets pass their own
-  camera.up.set(0, 0, 1);
+  camera.up.copy(up3 || new THREE.Vector3(0, 0, 1));                                // top view needs a HORIZONTAL up (else singular)
   camera.position.copy(c).addScaledVector(dir, dist);
   camera.near = Math.max(0.05, dist*0.02); camera.far = dist*20; camera.updateProjectionMatrix();
   controls.minDistance = dist*0.3; controls.maxDistance = dist*4; controls.update();
@@ -275,16 +284,58 @@ document.querySelectorAll('#ctl .btn[data-theme]').forEach(b => b.addEventListen
 
 let spinning=false;
 document.getElementById('spin').addEventListener('click', e => { spinning=!spinning; e.target.classList.toggle('on', spinning); });
-const VIEW_3D=new THREE.Vector3(0.25,-0.95,0.30), VIEW_TOP=new THREE.Vector3(0.02,-0.32,0.95);  // 3/4 vs near-top (axis-aligned)
-document.getElementById('vTop').addEventListener('click', () => { frameAll(VIEW_TOP); userMoved=true; });
-document.getElementById('v3D').addEventListener('click', () => { frameAll(VIEW_3D); userMoved=true; });
+const VIEWS={ top:{d:[0,0,1],u:[0,1,0]}, side:{d:[0,-1,0.03],u:[0,0,1]}, front:{d:[1,0,0.03],u:[0,0,1]}, iso:{d:[0.25,-0.95,0.30],u:[0,0,1]} };
+function applyView(n){ const v=VIEWS[n]||VIEWS.iso; mkControls(v.u); frameAll(new THREE.Vector3(...v.d), new THREE.Vector3(...v.u)); userMoved=true; }
+document.getElementById('vTop').addEventListener('click', () => applyView('top'));
+document.getElementById('v3D').addEventListener('click', () => applyView('iso'));
+
+// --- clickable 3-axis orientation gizmo (bottom-left): click X/Y/Z -> front/side/top ---
+const gizmoScene = new THREE.Scene();
+const gizmoCam = new THREE.OrthographicCamera(-1.7, 1.7, 1.7, -1.7, 0.1, 50);
+const GZ = 118; const gizmoTargets = [];
+function axisSprite(letter, hex){
+  const cv=document.createElement('canvas'); cv.width=cv.height=64; const x=cv.getContext('2d');
+  x.beginPath(); x.arc(32,32,29,0,7); x.fillStyle=hex; x.fill();
+  x.fillStyle='#0b1016'; x.font='bold 40px '+FONT; x.textAlign='center'; x.textBaseline='middle'; x.fillText(letter,32,35);
+  const t=new THREE.CanvasTexture(cv); t.anisotropy=4;
+  return new THREE.Sprite(new THREE.SpriteMaterial({map:t, depthTest:false}));
+}
+function mkAxis(vec, color, hex, letter, view){
+  gizmoScene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+    [new THREE.Vector3(0,0,0), vec.clone().multiplyScalar(0.8)]),
+    new THREE.LineBasicMaterial({color, transparent:true, opacity:0.85})));
+  const sp=axisSprite(letter, hex); sp.position.copy(vec); sp.scale.set(0.66,0.66,1); sp.userData={view};
+  gizmoScene.add(sp); gizmoTargets.push(sp);
+  const back=new THREE.Mesh(new THREE.SphereGeometry(0.13,12,12), new THREE.MeshBasicMaterial({color, transparent:true, opacity:0.3}));
+  back.position.copy(vec).multiplyScalar(-1); gizmoScene.add(back);
+}
+mkAxis(new THREE.Vector3(1,0,0), 0xff5a6a, '#ff5a6a', 'X', 'front');  // length -> look along X = front/rear
+mkAxis(new THREE.Vector3(0,1,0), 0x8ad46a, '#8ad46a', 'Y', 'side');   // width  -> look along Y = side
+mkAxis(new THREE.Vector3(0,0,1), 0x6ab0ff, '#6ab0ff', 'Z', 'top');    // height -> look down Z = top
+function renderGizmo(){
+  gizmoCam.position.copy(camera.position).sub(controls.target).normalize().multiplyScalar(4);
+  gizmoCam.up.copy(camera.up); gizmoCam.lookAt(0,0,0);
+  renderer.clearDepth(); renderer.setScissorTest(true);
+  renderer.setViewport(14,14,GZ,GZ); renderer.setScissor(14,14,GZ,GZ);
+  renderer.render(gizmoScene, gizmoCam);
+  renderer.setScissorTest(false); renderer.setViewport(0,0,innerWidth,innerHeight);
+}
+const gizmoRay=new THREE.Raycaster();
+renderer.domElement.addEventListener('pointerdown', (e)=>{
+  const r=renderer.domElement.getBoundingClientRect();
+  const px=e.clientX-r.left, py=r.height-(e.clientY-r.top);
+  if (px<14||px>14+GZ||py<14||py>14+GZ) return;
+  const hit=gizmoRay.setFromCamera({x:((px-14)/GZ)*2-1, y:((py-14)/GZ)*2-1}, gizmoCam) || gizmoRay;
+  const hits=gizmoRay.intersectObjects(gizmoTargets);
+  if (hits.length){ e.stopPropagation(); applyView(hits[0].object.userData.view); }
+}, true);
 addEventListener('resize', () => { camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); if(!userMoved) frameAll(); });
 
 function animate(){
   requestAnimationFrame(animate);
   if (spinning){ const a=0.003,c=Math.cos(a),s=Math.sin(a),x=camera.position.x,y=camera.position.y;
     camera.position.x=x*c-y*s; camera.position.y=x*s+y*c; }
-  controls.update(); renderer.render(scene,camera);
+  controls.update(); renderer.render(scene,camera); renderGizmo();
 }
 
 (async () => {
