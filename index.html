@@ -21,6 +21,16 @@
   #hdr p { font-size:12.5px; color:var(--mut); margin-top:6px; line-height:1.5; }
   #hdr .truck { color:var(--ink); font-weight:600; }
 
+  #pick { top:16px; left:50%; transform:translateX(-50%); padding:7px 9px; display:flex; align-items:center; gap:9px; z-index:6; }
+  #pick .pl { font-size:10px; letter-spacing:.16em; color:var(--gold); text-transform:uppercase; font-weight:700; }
+  #pick select { appearance:none; -webkit-appearance:none; background:rgba(255,255,255,.05); color:var(--ink);
+                 border:1px solid rgba(255,255,255,.16); border-radius:9px; padding:8px 34px 8px 13px; font:inherit;
+                 font-size:13.5px; font-weight:700; cursor:pointer; max-width:60vw;
+                 background-image:linear-gradient(45deg,transparent 50%,var(--mut) 50%),linear-gradient(135deg,var(--mut) 50%,transparent 50%);
+                 background-position:calc(100% - 18px) 51%,calc(100% - 13px) 51%; background-size:5px 5px,5px 5px; background-repeat:no-repeat; }
+  #pick select option { background:#0b1016; color:var(--ink); font-weight:600; }
+  #pick select option:disabled { color:#566677; }
+
   #vol { top:16px; right:16px; padding:14px 18px; text-align:right; min-width:170px; }
   #vol .lbl { font-size:11px; letter-spacing:.14em; color:var(--mut); text-transform:uppercase; }
   #vol .big { font-size:40px; font-weight:800; line-height:1; margin-top:4px;
@@ -68,6 +78,11 @@
 <body>
 <div id="app"></div>
 <div id="load"><div class="spin"></div><div>Loading 3D scan…</div></div>
+
+<div id="pick" class="panel">
+  <span class="pl">Truck</span>
+  <select id="truckSel" aria-label="Choose truck"></select>
+</div>
 
 <div id="hdr" class="panel">
   <div class="tag">Smart Material Control</div>
@@ -127,7 +142,7 @@ const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight); app.appendChild(renderer.domElement);
 
-const VER = '23';                      // bump every redeploy to bust browser/CDN cache
+const VER = '24';                      // bump every redeploy to bust browser/CDN cache
 // turbo colormap (matplotlib) lookup table — the "rainbow by height" theme
 const TURBO_LUT = [48,18,59,54,33,95,59,47,128,64,64,162,67,78,186,69,94,211,70,107,227,71,123,242,70,135,251,65,150,255,58,163,252,49,175,245,39,190,233,31,201,221,25,213,205,24,222,192,29,231,178,39,238,164,56,244,145,74,248,128,93,252,111,117,254,92,136,255,78,156,254,64,169,251,57,185,246,53,198,240,52,212,231,53,223,223,55,233,213,57,242,201,58,248,190,57,252,177,54,254,164,49,254,147,42,252,132,35,248,114,28,243,99,21,237,85,16,229,71,11,221,61,8,210,49,5,200,40,3,185,30,2,172,23,1,155,15,1,139,9,2,122,4,3];
 const VMAX = 3.5;                      // truck height for the height->colour mapping
@@ -198,7 +213,7 @@ function makeLabel(lines, scale=0.0024){
   sp.scale.set(cw*scale, ch*scale, 1); sp.renderOrder=999; return sp;
 }
 function buildLabels(){
-  const b=META.bed; if(!b) return;
+  const b=META.bed; if(!b || META.single || META.measured===false) return;   // no bed box for single/unmeasured trucks
   const grp=new THREE.Group(); grp.name='labels';
   const fz=b.floor_z, yn=b.yneg, yp=b.ypos, x0=b.x0, x1=b.x1, wt=b.wall_top;
   const midx=(x0+x1)/2, midz=(fz+wt)/2, V=(x,y,z)=>new THREE.Vector3(x,y,z);
@@ -254,8 +269,8 @@ function makeCloud(buf, material){
   g.computeBoundingSphere();
   return new THREE.Points(g, material);
 }
-async function load(name, material){
-  const buf = await (await fetch('clouds/'+name+'.bin?v='+VER)).arrayBuffer();
+async function load(id, name, material){
+  const buf = await (await fetch('clouds/'+id+'/'+name+'.bin?v='+VER)).arrayBuffer();
   const p = makeCloud(buf, material); p.visible=false; spin.add(p); clouds[name]=p;
 }
 
@@ -336,19 +351,66 @@ function animate(){
   renderer.autoClear=false; renderGizmo(); renderer.autoClear=true;   // overlay the gizmo without clearing colour (transparent bg)
 }
 
-(async () => {
-  try { META = await (await fetch('clouds/meta.json?v='+VER)).json();
-    truckid.textContent=META.truck; volnum.innerHTML=META.volume_m3+' <span>m³</span>'; massnum.textContent=META.mass_t;
-    fillnum.textContent=META.fill_pct; capnum.textContent=META.capacity_m3; } catch(e){}
-  await Promise.all([ load('structure', bedMat), load('material', matMat), load('empty', bedMat) ]);
-  show('full'); setTheme('rainbow'); buildLabels();
+let CURID = null;
+function updateInfo(){
+  truckid.textContent = META.plate || META.truck || '';
+  const single = !!META.single;
+  const measured = !single && META.measured !== false;
+  const cap=document.querySelector('#vol .cap'), sub=document.querySelector('#vol .sub');
+  if (measured){
+    volnum.style.fontSize=''; volnum.innerHTML=META.volume_m3+' <span>m³</span>';
+    sub.innerHTML='≈ <b>'+META.mass_t+'</b> t&nbsp;·&nbsp; <b>'+META.fill_pct+'</b>% of bed'
+      + (META.preliminary?' &nbsp;<i style="color:#f0b44a;font-style:normal">· preliminary</i>':'');
+    cap.style.display=''; cap.innerHTML='<span>Bed max load (L×W×H)</span><b>'+META.capacity_m3+'</b>&nbsp;m³';
+  } else {
+    volnum.style.fontSize='20px'; volnum.innerHTML = single ? 'Full scan' : 'Scan ready';
+    sub.innerHTML = single ? 'single capture · no empty bed to compare' : 'load measurement pending validation';
+    cap.style.display='none';
+  }
+  // single scans have no empty/material — disable those view buttons
+  document.querySelectorAll('#ctl .btn[data-view]').forEach(b=>{
+    const dis = single && (b.dataset.view==='empty' || b.dataset.view==='material');
+    b.style.opacity = dis?0.3:''; b.style.pointerEvents = dis?'none':'';
+  });
+}
+
+async function loadTruck(id){
+  if (id===CURID) return;
+  loadEl.classList.remove('gone'); loadEl.innerHTML='<div class="spin"></div><div>Loading truck…</div>';
+  spinning=false; document.getElementById('spin').classList.remove('on');
+  ['structure','material','empty'].forEach(k=>{ if(clouds[k]){ spin.remove(clouds[k]); clouds[k].geometry.dispose(); delete clouds[k]; }});
+  const old=spin.getObjectByName('labels'); if(old) spin.remove(old);
+  spin.position.set(0,0,0);
+  try {
+    META = await (await fetch('clouds/'+id+'/meta.json?v='+VER)).json();
+    await Promise.all([ load(id,'structure',bedMat), load(id,'material',matMat), load(id,'empty',bedMat) ]);
+  } catch(e){ fail('Could not load this truck’s scan.'); return; }
+  CURID=id;
+  updateInfo(); buildLabels(); setTheme(theme); show('full');
   { const box=new THREE.Box3(); ['structure','empty','material'].forEach(k=>{if(clouds[k])box.expandByObject(clouds[k]);});
     const ctr=box.getCenter(new THREE.Vector3()); ctr.z=0;     // pivot the Z-rotation about the truck's XY centre
     spin.position.copy(ctr); spin.children.forEach(c=>c.position.sub(ctr)); }
-  frameAll(); loadEl.classList.add('gone'); animate();
-  // re-frame after the viewport settles (mobile address-bar / late layout) until the user interacts
+  userMoved=false; frameAll(); loadEl.classList.add('gone');
   requestAnimationFrame(()=>{ if(!userMoved) frameAll(); });
-  setTimeout(()=>{ if(!userMoved) frameAll(); }, 500);
+  setTimeout(()=>{ if(!userMoved) frameAll(); }, 450);
+}
+
+(async () => {
+  let manifest;
+  try { manifest = await (await fetch('clouds/manifest.json?v='+VER)).json(); }
+  catch(e){ fail('Could not load the truck list.'); return; }
+  const sel=document.getElementById('truckSel');
+  (manifest.trucks||[]).forEach(t=>{
+    const o=document.createElement('option'); o.value=t.id;
+    const tag = t.paired ? '' : ' · single B'+t.full_batch;
+    o.textContent = t.plate + tag + (t.available?'':' — awaiting export');
+    o.disabled = !t.available; sel.appendChild(o);
+  });
+  const first=(manifest.trucks||[]).find(t=>t.available);
+  if(!first){ fail('No truck data available yet.'); return; }
+  sel.value=first.id; sel.addEventListener('change', ()=>loadTruck(sel.value));
+  animate();
+  await loadTruck(first.id);
 })();
 </script>
 </body>
