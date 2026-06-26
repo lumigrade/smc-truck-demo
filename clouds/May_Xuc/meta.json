@@ -5,18 +5,18 @@
   "single": true,
   "kind": "vehicle",
   "material": "vehicle",
-  "length_m": 9.3,
+  "length_m": 9.2,
   "width_m": 3.3,
-  "height_m": 4.0,
-  "structure_pts": 72133,
+  "height_m": 4.6,
+  "structure_pts": 105105,
   "material_pts": 0,
   "empty_pts": 0,
   "box": {
-    "x0": -4.66,
-    "x1": 4.66,
-    "y0": -1.67,
-    "y1": 1.67,
+    "x0": -4.62,
+    "x1": 4.62,
+    "y0": -1.63,
+    "y1": 1.63,
     "z0": 0.0,
-    "z1": 4.03
+    "z1": 4.55
   }
 }
