@@ -1,0 +1,12 @@
+{
+  "truck": "50E-650.58",
+  "plate": "50E-650.58",
+  "sweep": "single (manual)",
+  "single": true,
+  "material": "soil / fill",
+  "structure_pts": 166943,
+  "material_pts": 0,
+  "empty_pts": 0,
+  "length_m": 10.9,
+  "tilt_deg": -1.9
+}

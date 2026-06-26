@@ -1,0 +1,12 @@
+{
+  "truck": "76C-102.90",
+  "plate": "76C-102.90",
+  "sweep": "single (manual)",
+  "single": true,
+  "material": "soil / fill",
+  "structure_pts": 74538,
+  "material_pts": 0,
+  "empty_pts": 0,
+  "length_m": 7.7,
+  "tilt_deg": 1.4
+}

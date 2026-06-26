@@ -1,0 +1,12 @@
+{
+  "truck": "Batch62_LongPickup",
+  "plate": "Long pickup \u00b7 B62",
+  "sweep": "single (manual)",
+  "single": true,
+  "material": "soil / fill",
+  "structure_pts": 87649,
+  "material_pts": 0,
+  "empty_pts": 0,
+  "length_m": 10.5,
+  "tilt_deg": 0.2
+}
