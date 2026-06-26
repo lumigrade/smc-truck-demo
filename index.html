@@ -98,6 +98,9 @@
   <span class="sep"></span>
   <button class="btn on" data-theme="rainbow">🌈 Height</button>
   <button class="btn" data-theme="type">Steel + Gold</button>
+  <span class="sep"></span>
+  <button class="btn ghost" id="vTop">⊤ Top</button>
+  <button class="btn ghost" id="v3D">◳ 3D</button>
   <button class="btn ghost" id="spin">⟳ Spin</button>
 </div>
 
@@ -126,7 +129,7 @@ const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight); app.appendChild(renderer.domElement);
 
-const VER = '16';                      // bump every redeploy to bust browser/CDN cache
+const VER = '17';                      // bump every redeploy to bust browser/CDN cache
 // turbo colormap (matplotlib) lookup table — the "rainbow by height" theme
 const TURBO_LUT = [48,18,59,54,33,95,59,47,128,64,64,162,67,78,186,69,94,211,70,107,227,71,123,242,70,135,251,65,150,255,58,163,252,49,175,245,39,190,233,31,201,221,25,213,205,24,222,192,29,231,178,39,238,164,56,244,145,74,248,128,93,252,111,117,254,92,136,255,78,156,254,64,169,251,57,185,246,53,198,240,52,212,231,53,223,223,55,233,213,57,242,201,58,248,190,57,252,177,54,254,164,49,254,147,42,252,132,35,248,114,28,243,99,21,237,85,16,229,71,11,221,61,8,210,49,5,200,40,3,185,30,2,172,23,1,155,15,1,139,9,2,122,4,3];
 const VMAX = 3.5;                      // truck height for the height->colour mapping
@@ -149,7 +152,7 @@ let userMoved=false; controls.addEventListener('start', ()=>{ userMoved=true; })
 
 // Frame the WHOLE truck no matter where it sits or how big it is, from a 3/4 side
 // view, so nothing is ever cropped out of the default view.
-function frameAll(){
+function frameAll(dir3){
   const box = new THREE.Box3();
   ['structure','empty','material'].forEach(k => { if (clouds[k]) box.expandByObject(clouds[k]); });
   if (box.isEmpty()) return;
@@ -163,7 +166,8 @@ function frameAll(){
   const hfov = 2*Math.atan(Math.tan(vfov/2)*asp);
   const len = Math.max(s.x, s.y), hgt = s.z;
   const dist = Math.max( (len/2)/Math.tan(hfov/2), (hgt/2)/Math.tan(vfov/2) ) * 1.32;
-  const dir = new THREE.Vector3(0.25, -0.95, 0.30).normalize();  // side-3/4, lower elevation (long truck reads better)
+  const dir = (dir3 || new THREE.Vector3(0.25, -0.95, 0.30)).clone().normalize();  // default side-3/4; presets pass their own
+  camera.up.set(0, 0, 1);
   camera.position.copy(c).addScaledVector(dir, dist);
   camera.near = Math.max(0.05, dist*0.02); camera.far = dist*20; camera.updateProjectionMatrix();
   controls.minDistance = dist*0.3; controls.maxDistance = dist*4; controls.update();
@@ -211,6 +215,12 @@ function buildLabels(){
   // HEIGHT — vertical edge of the tailgate near (-Y) corner, floor to rim
   dim(V(x0,yn,fz), V(x0,yn,wt)); tick(V(x0,yn,fz),V(0.13,0,0)); tick(V(x0,yn,wt),V(0.13,0,0));
   const Hl=makeLabel([{t:'Height  '+b.height_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0030); Hl.position.set(x0-0.35,yn-0.35,midz); grp.add(Hl);
+  // BED WIREFRAME BOX (floor + walls + rim) — makes fill-vs-rim DEPTH visible (a full footprint ≠ a full bed)
+  const bp=[[x0,yn,fz],[x1,yn,fz],[x1,yp,fz],[x0,yp,fz],[x0,yn,wt],[x1,yn,wt],[x1,yp,wt],[x0,yp,wt]];
+  const be=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+  const bv=[]; be.forEach(e=>{ bv.push(...bp[e[0]],...bp[e[1]]); });
+  const bgeo=new THREE.BufferGeometry(); bgeo.setAttribute('position',new THREE.Float32BufferAttribute(bv,3));
+  grp.add(Object.assign(new THREE.LineSegments(bgeo,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.45,depthTest:false})),{renderOrder:997}));
   scene.add(grp);
 }
 
@@ -265,6 +275,9 @@ document.querySelectorAll('#ctl .btn[data-theme]').forEach(b => b.addEventListen
 
 let spinning=false;
 document.getElementById('spin').addEventListener('click', e => { spinning=!spinning; e.target.classList.toggle('on', spinning); });
+const VIEW_3D=new THREE.Vector3(0.25,-0.95,0.30), VIEW_TOP=new THREE.Vector3(0.02,-0.32,0.95);  // 3/4 vs near-top (axis-aligned)
+document.getElementById('vTop').addEventListener('click', () => { frameAll(VIEW_TOP); userMoved=true; });
+document.getElementById('v3D').addEventListener('click', () => { frameAll(VIEW_3D); userMoved=true; });
 addEventListener('resize', () => { camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); if(!userMoved) frameAll(); });
 
 function animate(){
