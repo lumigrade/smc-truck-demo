@@ -27,6 +27,9 @@
               background:linear-gradient(180deg,#ffd98a,#f0b44a); -webkit-background-clip:text; background-clip:text; color:transparent; }
   #vol .big span { font-size:18px; font-weight:700; color:var(--gold); -webkit-text-fill-color:var(--gold); }
   #vol .sub { font-size:13px; color:var(--ink); margin-top:6px; } #vol .sub b { color:var(--gold); }
+  #vol .cap { font-size:13px; color:var(--mut); margin-top:9px; padding-top:9px; border-top:1px solid rgba(255,255,255,.10); }
+  #vol .cap span { display:block; font-size:10px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:1px; }
+  #vol .cap b { font-size:19px; font-weight:700; color:var(--steel); }
 
   #ctl { bottom:18px; left:50%; transform:translateX(-50%); padding:8px; display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
   .btn { appearance:none; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.04); color:var(--ink);
@@ -77,7 +80,8 @@
 <div id="vol" class="panel">
   <div class="lbl">Material on board</div>
   <div class="big" id="volnum">— <span>m³</span></div>
-  <div class="sub">≈ <b id="massnum">—</b> tonnes</div>
+  <div class="sub">≈ <b id="massnum">—</b> t&nbsp; ·&nbsp; <b id="fillnum">—</b>% of bed</div>
+  <div class="cap"><span>Bed max load (L×W×H)</span><b id="capnum">—</b>&nbsp;m³</div>
 </div>
 
 <div id="ctrls" class="panel" style="display:none">
@@ -99,8 +103,9 @@
 
 <div id="note" class="panel"><b>How it works:</b> the LiDAR point cloud is a real measurement (no CAD).
   Every point above the empty-bed surface is classified as material; the volume is the integral of that
-  height difference over the bed. <b>🌈 Height</b> colours points by elevation; <b>Steel + Gold</b> tints
-  the load vs the truck (with recolour / fade sliders).</div>
+  height difference over the bed. The <b>bed max load</b> is this bed's own capacity from its measured
+  L×W×H — actual vs max is reported as data; pass/fail is set by contract. <b>🌈 Height</b> colours by
+  elevation; <b>Steel + Gold</b> tints load vs truck.</div>
 <div id="hint" class="panel">drag to rotate · scroll / pinch to zoom</div>
 
 <script type="importmap">
@@ -121,7 +126,7 @@ const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight); app.appendChild(renderer.domElement);
 
-const VER = '15';                      // bump every redeploy to bust browser/CDN cache
+const VER = '16';                      // bump every redeploy to bust browser/CDN cache
 // turbo colormap (matplotlib) lookup table — the "rainbow by height" theme
 const TURBO_LUT = [48,18,59,54,33,95,59,47,128,64,64,162,67,78,186,69,94,211,70,107,227,71,123,242,70,135,251,65,150,255,58,163,252,49,175,245,39,190,233,31,201,221,25,213,205,24,222,192,29,231,178,39,238,164,56,244,145,74,248,128,93,252,111,117,254,92,136,255,78,156,254,64,169,251,57,185,246,53,198,240,52,212,231,53,223,223,55,233,213,57,242,201,58,248,190,57,252,177,54,254,164,49,254,147,42,252,132,35,248,114,28,243,99,21,237,85,16,229,71,11,221,61,8,210,49,5,200,40,3,185,30,2,172,23,1,155,15,1,139,9,2,122,4,3];
 const VMAX = 3.5;                      // truck height for the height->colour mapping
@@ -183,27 +188,29 @@ function makeLabel(lines, scale=0.0024){
 function buildLabels(){
   const b=META.bed; if(!b) return;
   const grp=new THREE.Group(); grp.name='labels';
-  const fz=b.floor_z, hw=b.half_w, x0=b.x0, x1=b.x1, H=b.height_m, midx=(x0+x1)/2, top=fz+H, V=(x,y,z)=>new THREE.Vector3(x,y,z);
+  const fz=b.floor_z, yn=b.yneg, yp=b.ypos, x0=b.x0, x1=b.x1, wt=b.wall_top;
+  const midx=(x0+x1)/2, midz=(fz+wt)/2, V=(x,y,z)=>new THREE.Vector3(x,y,z);
+  // DATA-ONLY card: actual load vs designed bed max (SunGroup judges pass/fail per contract)
   const card=makeLabel([
-    {t:'TRUCK '+(META.truck||''), b:true, fs:30, c:'#f0b44a'},
-    {t:'Material load (LiDAR-measured)', fs:21, c:'#9fb0c2'},
-    {t:META.volume_m3+' m³   ≈ '+META.mass_t+' t', b:true, fs:42, c:'#ffd98a'},
-    {t:'Bed  '+b.length_m+' L × '+b.width_m+' W × '+b.height_m+' H  m', fs:23, c:'#e8eef5'},
-    {t:'Bed capacity  '+b.capacity_m3+' m³', fs:21, c:'#9fb0c2'},
-  ], 0.0027);
-  card.position.set(midx, 0, top+1.0); grp.add(card);
-  const lineMat=new THREE.LineBasicMaterial({ color:0xf0b44a, transparent:true, opacity:0.85, depthTest:false });
+    {t:'TRUCK '+(META.truck||'')+'   ·   '+(META.material||''), b:true, fs:24, c:'#f0b44a'},
+    {t:'Actual load     '+META.volume_m3+' m³', b:true, fs:34, c:'#ffd98a'},
+    {t:'Bed max load   '+b.capacity_m3+' m³', b:true, fs:27, c:'#cfe0f0'},
+    {t:META.fill_pct+'% of bed   ·   ≈ '+META.mass_t+' t', fs:18, c:'#9fb0c2'},
+  ], 0.0036);
+  card.position.set(midx, 0, wt+1.35); grp.add(card);
+  const lineMat=new THREE.LineBasicMaterial({ color:0xf0b44a, transparent:true, opacity:0.9, depthTest:false });
   const dim=(a,c)=>{ const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints([a,c]), lineMat); l.renderOrder=998; grp.add(l); };
   const tick=(p,dir)=>{ dim(p.clone().add(dir), p.clone().sub(dir)); };
-  // length along the front-side floor edge
-  dim(V(x0,-hw-0.25,fz), V(x1,-hw-0.25,fz)); tick(V(x0,-hw-0.25,fz),V(0,0,0.12)); tick(V(x1,-hw-0.25,fz),V(0,0,0.12));
-  const Ll=makeLabel([{t:'Length  '+b.length_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0023); Ll.position.set(midx,-hw-0.25,fz-0.28); grp.add(Ll);
-  // width across the rear floor edge
-  dim(V(x1+0.25,-hw,fz), V(x1+0.25,hw,fz)); tick(V(x1+0.25,-hw,fz),V(0,0,0.12)); tick(V(x1+0.25,hw,fz),V(0,0,0.12));
-  const Wl=makeLabel([{t:'Width  '+b.width_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0023); Wl.position.set(x1+0.25,0,fz-0.28); grp.add(Wl);
-  // height up the rear corner
-  dim(V(x0-0.25,hw,fz), V(x0-0.25,hw,top)); tick(V(x0-0.25,hw,fz),V(0.12,0,0)); tick(V(x0-0.25,hw,top),V(0.12,0,0));
-  const Hl=makeLabel([{t:'Height  '+b.height_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0023); Hl.position.set(x0-0.25,hw,fz+H/2); grp.add(Hl);
+  // dimension gizmo anchored to the real bed: top rim + the tailgate corner edge
+  // LENGTH — top edge of the near (-Y) wall
+  dim(V(x0,yn,wt), V(x1,yn,wt)); tick(V(x0,yn,wt),V(0,0,0.13)); tick(V(x1,yn,wt),V(0,0,0.13));
+  const Ll=makeLabel([{t:'Length  '+b.length_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0030); Ll.position.set(midx,yn-0.45,wt); grp.add(Ll);
+  // WIDTH — top edge across the tailgate (-X) end
+  dim(V(x0,yn,wt), V(x0,yp,wt)); tick(V(x0,yn,wt),V(0,0,0.13)); tick(V(x0,yp,wt),V(0,0,0.13));
+  const Wl=makeLabel([{t:'Width  '+b.width_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0030); Wl.position.set(x0-0.55,0,wt); grp.add(Wl);
+  // HEIGHT — vertical edge of the tailgate near (-Y) corner, floor to rim
+  dim(V(x0,yn,fz), V(x0,yn,wt)); tick(V(x0,yn,fz),V(0.13,0,0)); tick(V(x0,yn,wt),V(0.13,0,0));
+  const Hl=makeLabel([{t:'Height  '+b.height_m+' m', b:true, fs:25, c:'#f0b44a'}],0.0030); Hl.position.set(x0-0.35,yn-0.35,midz); grp.add(Hl);
   scene.add(grp);
 }
 
@@ -269,7 +276,8 @@ function animate(){
 
 (async () => {
   try { META = await (await fetch('clouds/meta.json?v='+VER)).json();
-    truckid.textContent=META.truck; volnum.innerHTML=META.volume_m3+' <span>m³</span>'; massnum.textContent=META.mass_t; } catch(e){}
+    truckid.textContent=META.truck; volnum.innerHTML=META.volume_m3+' <span>m³</span>'; massnum.textContent=META.mass_t;
+    fillnum.textContent=META.fill_pct; capnum.textContent=META.capacity_m3; } catch(e){}
   await Promise.all([ load('structure', bedMat), load('material', matMat), load('empty', bedMat) ]);
   show('full'); setTheme('rainbow'); buildLabels(); frameAll(); loadEl.classList.add('gone'); animate();
   // re-frame after the viewport settles (mobile address-bar / late layout) until the user interacts
