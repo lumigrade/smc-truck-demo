@@ -18,6 +18,9 @@ an excavator — with height-rainbow point clouds, dimension boxes, and *Actual 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — the production blueprint: an automated, multi-gate,
   vertical-sweep system with fixed calibration anchors, SCN→PLY→dashboard, scaling to 3 interconnected
   sites with minimal human touch.
+- **[BUILD_PLAN.md](BUILD_PLAN.md)** — the concrete Phase-1 build (one gate, end to end): bill of
+  materials, the SCN→PLY service, the edge pipeline, the empty-baseline *fingerprint* + monthly
+  re-validation, the full-platform dashboard schema, and a timeline.
 
 ## Repo
 

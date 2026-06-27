@@ -32,14 +32,14 @@ fixed & automatic*, *measure from one source of truth*.
        (≥3 fixed blocky calibration anchors, surveyed once, in every sensor's view)
 ```
 
-- **2 sensors** (one each side, looking down) = the proven layout. **4 sensors** (2 per side, or 4
-  corners) when you need to kill cab-shadow / heaped-load occlusion and want redundancy. *Start with
-  2, wire the portal for 4.*
-- **picoScan100, vertical sweep down.** Confirm the chosen model's range covers the worst-case
-  diagonal (mount height + half lane width to the far wheel) with margin; vertical fan across the lane.
+- **4 sensors** (2 per side, or 4 corners), all vertical sweep down — full top + both sides with the
+  cab-shadow / heaped-load occlusion killed, plus redundancy if one is knocked.
+- **picoScan100, vertical sweep down.** Confirm the model's range/FOV/scan-rate covers the worst-case
+  diagonal (mount height + half lane width to the far wheel) and gives enough points at drive-through speed.
 - **Rigid portal**, not independent masts — fixed sensor geometry is what makes calibration stable.
 - An **edge PC** (industrial mini-PC / Jetson / NUC) bolted to the portal does all local compute.
-- *(Optional)* an **ANPR camera** for the plate, and a **light-barrier/loop** as a backup trigger.
+- A **front ANPR camera with a CPL (polarizing) lens + illuminator** — reads the plate and sees the
+  driver through the windshield. *(Optional)* a light-barrier/loop as a backup trigger.
 
 ## 2. Calibration — fixed anchors (the core idea)
 
@@ -76,19 +76,21 @@ All steps run **unattended on the edge node**. The two pieces to build new: the 
 service** and the **auto-trigger** (both are well-defined; the demo already proves everything
 downstream).
 
-## 4. Getting the load without a manual "empty" pass (decide this)
+## 4. Load via the empty-baseline *fingerprint* (chosen)
 
-A single gate usually sees a truck **once** (loaded). Three ways to still get the load:
+Each truck has a **fingerprint** — its EMPTY bed surface (rim, floor, walls) + silhouette + bed
+L×W×H, keyed by plate — stored in the central registry and shared by all gates.
 
-- **A · two-pass** — empty in / full out (or entry + exit gates); pair by plate + time. Cleanest *if*
-  the site gives a free empty pass.
-- **B · empty-baseline library** — store each truck's empty-bed shape the first time it passes empty
-  (keyed by plate); subtract thereafter. Self-building, shared across gates via the central registry.
-- **C · single-pass** — detect the bed (rim + floor + walls) from the loaded scan + a truck-model bed
-  template; load = material above the floor, capacity = bed volume. **Most hands-off**; needs the bed
-  walls well-sampled (vertical sweep + 4 sensors help).
-
-Recommendation: **target C, fall back to B** (auto-built), use A where the layout offers it.
+- **Register**: the first time a truck passes empty, store its fingerprint.
+- **Each loaded pass**: look up the truck by plate → subtract its fingerprint → the **load**. A
+  per-pass sanity check (the bed walls visible *below* the material must match the fingerprint) flags a
+  wrong plate or a recently-modified bed.
+- **Monthly re-validation**: periodically re-scan each truck empty (scheduled, or a natural empty
+  pass). If the bed changed beyond a threshold — raised sides, an extension, a new bed — **raise an
+  alert, update the fingerprint across every gate**, and mark that truck's recent loads for review. The
+  whole gate network thereby *acknowledges* a modified truck automatically.
+- **Single-pass fallback** (option C): when no fingerprint exists yet (a brand-new truck's first
+  loaded pass), measure against a truck-model bed template so we still get a result.
 
 ## 5. Multi-gate topology (3 sites)
 
@@ -140,14 +142,14 @@ Recommendation: **target C, fall back to B** (auto-built), use A where the layou
 3. **Phase 3 — replicate to 3 gates + central registry/dashboard.** One truck's data follows it
    across sites.
 
-## 8. Decisions I need from you
+## 8. Locked decisions (2026-06-27)
 
-1. **Sensors per gate:** 2 (proven, cheaper) or 4 (better coverage/redundancy)?
-2. **Load method:** single-pass (C), empty-baseline (B), or two-pass (A) — i.e. *do trucks ever pass
-   empty at a gate?*
-3. **Plate capture:** ANPR camera, RFID tags, or manual entry?
-4. **Anchors:** purpose-built blocks, or can we use existing fixed site features?
-5. **Dashboard:** extend this web viewer + a small backend, or a full platform (auth, reports, export)?
+| # | Decision | Choice |
+|---|---|---|
+| 1 | Sensors per gate | **4** — full top + sides, reduced occlusion, redundancy |
+| 2 | Load method | **Empty-baseline (B)** — a per-truck *fingerprint*, auto-learned, **re-validated monthly** so a modified bed is detected and acknowledged across all gates (see §4) |
+| 3 | Truck ID | **Front license-plate camera (ANPR) + CPL lens** — reads the plate *and* sees the driver through the windshield |
+| 4 | Anchors | purpose-built fixed blocks (existing site features only if proven stable) |
+| 5 | Dashboard | **Full platform** — auth/roles, reports/exports, alerts, multi-site |
 
-Answer these and I'll turn this into a concrete Phase-1 build plan (bill of materials, the SCN→PLY
-service spec, the edge pipeline, and the dashboard schema).
+→ These are turned into a concrete, costed build in **[BUILD_PLAN.md](BUILD_PLAN.md)**.
